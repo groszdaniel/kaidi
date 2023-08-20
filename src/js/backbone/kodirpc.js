@@ -114,15 +114,21 @@ class KodiRPC {
 
   /*
 
-  Function kodiXmlHttpRequest (String method, Object/undefined params)
+  Function kodiXmlHttpRequest (String/([String, Object/undefined][]) methodOrRequests,
+    Object/undefined params)
 
   Starts a new XHR request to Kodi, using the provided IP address and port.
+  Either the first parameter should be a method name and the second parameter its parameters,
+  or the parameter should be an array of [method, params] pairs for batched requests.
 
   Returns: Promise (resolve: Object, reject: KodiResponseError/KodiXHRError)
+  In the case of batched requests, the response is returned as is, is an array, and indiviual
+  responses may contain errors. Otherwise only the result field is returned, and the promise
+  is rejected in case of error.
 
   */
 
-  kodiXmlHttpRequest (method, params = undefined) {
+  kodiXmlHttpRequest (methodOrRequests, params = undefined) {
     // { mozSystem: true } since CORS. Uses `systemXHR` permission in manifest.
     var request = new XMLHttpRequest({ mozSystem: true })
     // Timeout so the app feels 'quicker'.
@@ -135,6 +141,8 @@ class KodiRPC {
         if (request.status >= 200 && request.status < 300) {
           try {
             var reply = JSON.parse(request.responseText)
+            if (reply instanceof Array)
+              resolve(reply)
             // Checks for error field in response.
             if (reply.error) {
               reject(new KodiResponseError(new Error('Response contains error')))
@@ -157,18 +165,29 @@ class KodiRPC {
       }
       // An attempt to reduce the request size if `params` isn't even there.
       // Generates a random number so the requests (hopefully) doesn't get mixed up too.
-      if (params) {
+      if (methodOrRequests instanceof Array)
+        request.send(JSON.stringify(methodOrRequests.map(request => (request[1] ? {
+          jsonrpc: '2.0',
+          id: 'KodiRPCJavascript-' + Math.random().toString(36).substr(2, 5),
+          method: request[0],
+          params: request[1]
+        } : {
+          jsonrpc: '2.0',
+          id: 'KodiRPCJavascript-' + Math.random().toString(36).substr(2, 5),
+          method: request[0],
+        }))))
+      else if (params) {
         request.send(JSON.stringify({
           jsonrpc: '2.0',
           id: 'KodiRPCJavascript-' + Math.random().toString(36).substr(2, 5),
-          method: method,
+          method: methodOrRequests,
           params: params
         }))
       } else {
         request.send(JSON.stringify({
           jsonrpc: '2.0',
           id: 'KodiRPCJavascript-' + Math.random().toString(36).substr(2, 5),
-          method: method
+          method: methodOrRequests
         }))
       }
     })
